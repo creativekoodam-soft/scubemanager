@@ -16,6 +16,11 @@ export interface Booking {
   status: BookingStatus;
   createdAt: number;
   notes?: string;
+  invoiceDetails?: {
+    ratePerHour: number;
+    totalAmount: number;
+    generatedAt: number;
+  };
 }
 
 export interface BookingStats {

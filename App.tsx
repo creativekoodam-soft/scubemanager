@@ -4,6 +4,7 @@ import BookingForm from './components/BookingForm';
 import BookingList from './components/BookingList';
 import CalendarView from './components/CalendarView';
 import Reports from './components/Reports';
+import AskAI from './components/AskAI';
 import { Booking, BookingStatus, ViewMode } from './types';
 import { generateSessionSummary } from './services/geminiService';
 
@@ -53,6 +54,12 @@ const App: React.FC = () => {
   const handleComplete = (id: string, endTime: string) => {
     setBookings(prev => prev.map(b => 
       b.id === id ? { ...b, status: BookingStatus.COMPLETED, actualEndTime: endTime } : b
+    ));
+  };
+
+  const handleUpdateBooking = (updatedBooking: Booking) => {
+    setBookings(prev => prev.map(b => 
+      b.id === updatedBooking.id ? updatedBooking : b
     ));
   };
 
@@ -139,6 +146,7 @@ const App: React.FC = () => {
                   bookings={getTodaysBookings()} 
                   onStatusChange={handleStatusChange} 
                   onComplete={handleComplete}
+                  onUpdateBooking={handleUpdateBooking}
                 />
               </div>
               
@@ -149,6 +157,7 @@ const App: React.FC = () => {
                     bookings={getUpcomingBookings().filter(b => b.date !== new Date().toISOString().split('T')[0]).slice(0, 5)} 
                     onStatusChange={handleStatusChange} 
                     onComplete={handleComplete}
+                    onUpdateBooking={handleUpdateBooking}
                   />
                 </div>
               </div>
@@ -168,6 +177,9 @@ const App: React.FC = () => {
           )}
         </div>
       </main>
+
+      {/* AI Assistant Floating Button */}
+      <AskAI bookings={bookings} />
 
       {/* Mobile Navigation Bottom Bar */}
       <div className="md:hidden fixed bottom-0 left-0 right-0 h-16 bg-black/80 backdrop-blur-xl border-t border-white/10 flex items-center justify-around px-4 z-40">

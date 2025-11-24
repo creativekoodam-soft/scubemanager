@@ -1,16 +1,22 @@
 import React, { useState } from 'react';
-import { CheckCircle, Trash2, Clock, Phone, Music, AlertCircle, X, Save } from 'lucide-react';
+import { CheckCircle, Trash2, Clock, Phone, Music, AlertCircle, X, Save, FileText, Download, Share2 } from 'lucide-react';
 import { Booking, BookingStatus } from '../types';
+import jsPDF from 'jspdf';
 
 interface BookingListProps {
   bookings: Booking[];
   onStatusChange: (id: string, status: BookingStatus) => void;
   onComplete: (id: string, endTime: string) => void;
+  onUpdateBooking?: (booking: Booking) => void; // Added for invoice update
 }
 
-const BookingList: React.FC<BookingListProps> = ({ bookings, onStatusChange, onComplete }) => {
+const BookingList: React.FC<BookingListProps> = ({ bookings, onStatusChange, onComplete, onUpdateBooking }) => {
   const [completingId, setCompletingId] = useState<string | null>(null);
   const [completionTime, setCompletionTime] = useState<string>('');
+  
+  // Invoice State
+  const [invoicingId, setInvoicingId] = useState<string | null>(null);
+  const [invoiceRate, setInvoiceRate] = useState<number>(1000);
 
   const getStatusColor = (status: BookingStatus) => {
     switch (status) {
@@ -22,7 +28,6 @@ const BookingList: React.FC<BookingListProps> = ({ bookings, onStatusChange, onC
   };
 
   const initiateCompletion = (booking: Booking) => {
-    // Calculate a default end time based on start + duration
     const startParts = booking.startTime.split(':').map(Number);
     const endHour = (startParts[0] + booking.durationHours) % 24;
     const defaultEnd = `${endHour.toString().padStart(2, '0')}:${startParts[1].toString().padStart(2, '0')}`;
@@ -36,6 +41,101 @@ const BookingList: React.FC<BookingListProps> = ({ bookings, onStatusChange, onC
       onComplete(completingId, completionTime);
       setCompletingId(null);
     }
+  };
+
+  // Invoice Logic
+  const handleCreateInvoice = (booking: Booking) => {
+    setInvoicingId(booking.id);
+    // Default rate or existing rate
+    setInvoiceRate(booking.invoiceDetails?.ratePerHour || 1000);
+  };
+
+  const generateAndDownloadPDF = (booking: Booking, rate: number, total: number) => {
+    const doc = new jsPDF();
+    
+    // Header
+    doc.setFillColor(15, 5, 24); // Dark background
+    doc.rect(0, 0, 210, 40, 'F');
+    
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(22);
+    doc.setTextColor(255, 255, 255);
+    doc.text("S CUBE STUDIOZ", 20, 20);
+    doc.setFontSize(10);
+    doc.text("Professional Recording Studio", 20, 28);
+
+    // Invoice Info
+    doc.setTextColor(0, 0, 0);
+    doc.setFontSize(16);
+    doc.text("INVOICE", 20, 60);
+    
+    doc.setFontSize(10);
+    doc.text(`Invoice Date: ${new Date().toLocaleDateString()}`, 20, 70);
+    doc.text(`Booking Ref: #${booking.id.slice(0, 8).toUpperCase()}`, 20, 75);
+
+    // Client Details
+    doc.setFont("helvetica", "bold");
+    doc.text("Bill To:", 20, 90);
+    doc.setFont("helvetica", "normal");
+    doc.text(booking.clientName, 20, 95);
+    if(booking.phoneNumber) doc.text(booking.phoneNumber, 20, 100);
+
+    // Table Header
+    let y = 120;
+    doc.setFillColor(240, 240, 240);
+    doc.rect(20, y-5, 170, 10, 'F');
+    doc.setFont("helvetica", "bold");
+    doc.text("Description", 25, y);
+    doc.text("Rate/Hr", 120, y);
+    doc.text("Hours", 150, y);
+    doc.text("Amount", 180, y, { align: 'right' });
+
+    // Table Content
+    y += 15;
+    doc.setFont("helvetica", "normal");
+    doc.text(`${booking.type} Session`, 25, y);
+    doc.text(`${rate}`, 120, y);
+    doc.text(`${booking.durationHours}`, 150, y);
+    doc.text(`${total}`, 180, y, { align: 'right' });
+
+    // Total
+    y += 20;
+    doc.setDrawColor(200, 200, 200);
+    doc.line(20, y, 190, y);
+    y += 10;
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(14);
+    doc.text("Total Amount:", 120, y);
+    doc.text(`Rs. ${total}`, 180, y, { align: 'right' });
+
+    // Footer
+    doc.setFontSize(8);
+    doc.setTextColor(100, 100, 100);
+    doc.text("Thank you for choosing S CUBE STUDIOZ!", 105, 280, { align: 'center' });
+
+    doc.save(`Invoice_${booking.clientName.replace(/\s+/g, '_')}_${booking.date}.pdf`);
+
+    // Save invoice details to booking if callback exists
+    if(onUpdateBooking) {
+        onUpdateBooking({
+            ...booking,
+            invoiceDetails: {
+                ratePerHour: rate,
+                totalAmount: total,
+                generatedAt: Date.now()
+            }
+        });
+    }
+  };
+
+  const shareOnWhatsApp = (booking: Booking, total: number) => {
+    if (!booking.phoneNumber) {
+        alert("Client phone number is missing!");
+        return;
+    }
+    const message = `Hello ${booking.clientName},\nHere is your invoice for the ${booking.type} session at S CUBE STUDIOZ.\n\nDate: ${booking.date}\nDuration: ${booking.durationHours} hrs\nTotal Amount: Rs. ${total}\n\nThank you!`;
+    const url = `https://wa.me/${booking.phoneNumber.replace(/[^0-9]/g, '')}?text=${encodeURIComponent(message)}`;
+    window.open(url, '_blank');
   };
 
   if (bookings.length === 0) {
@@ -78,7 +178,7 @@ const BookingList: React.FC<BookingListProps> = ({ bookings, onStatusChange, onC
             </div>
 
             {/* Actions */}
-            <div className="flex items-center gap-2 w-full md:w-auto">
+            <div className="flex flex-col items-end gap-2 w-full md:w-auto">
                {completingId === booking.id ? (
                  <div className="flex items-center gap-2 bg-black/40 p-1 rounded-lg border border-purple-500/50 animate-fadeIn">
                    <span className="text-xs text-gray-300 pl-2">End Time:</span>
@@ -104,43 +204,92 @@ const BookingList: React.FC<BookingListProps> = ({ bookings, onStatusChange, onC
                    </button>
                  </div>
                ) : (
-                 <>
+                 <div className="flex items-center gap-2">
                    {booking.status === BookingStatus.CONFIRMED && (
                      <>
                        <button 
                          onClick={() => initiateCompletion(booking)}
-                         className="flex-1 md:flex-none flex items-center justify-center gap-1 bg-green-500/10 hover:bg-green-500/20 text-green-400 border border-green-500/30 px-3 py-2 rounded-lg transition-colors"
+                         className="flex items-center gap-1 bg-green-500/10 hover:bg-green-500/20 text-green-400 border border-green-500/30 px-3 py-2 rounded-lg transition-colors text-sm"
                          title="Mark Completed"
                        >
-                         <CheckCircle size={18} />
-                         <span className="md:hidden">Complete</span>
+                         <CheckCircle size={16} /> <span className="hidden md:inline">Complete</span>
                        </button>
                        
                        <button 
                          onClick={() => onStatusChange(booking.id, BookingStatus.CANCELLED)}
-                         className="flex-1 md:flex-none flex items-center justify-center gap-1 bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/30 px-3 py-2 rounded-lg transition-colors"
+                         className="flex items-center gap-1 bg-red-500/10 hover:bg-red-500/20 text-red-400 border border-red-500/30 px-3 py-2 rounded-lg transition-colors text-sm"
                          title="Cancel Booking"
                        >
-                         <Trash2 size={18} />
-                         <span className="md:hidden">Cancel</span>
+                         <Trash2 size={16} /> <span className="hidden md:inline">Cancel</span>
                        </button>
                      </>
                    )}
-                 </>
-               )}
 
-               {booking.status === BookingStatus.CANCELLED && (
-                 <div className="flex items-center gap-1 text-red-400 text-sm italic">
-                    <AlertCircle size={16} /> Cancelled
+                    {booking.status === BookingStatus.COMPLETED && (
+                        <button 
+                            onClick={() => handleCreateInvoice(booking)}
+                            className="flex items-center gap-1 bg-indigo-500/10 hover:bg-indigo-500/20 text-indigo-400 border border-indigo-500/30 px-3 py-2 rounded-lg transition-colors text-sm"
+                        >
+                            <FileText size={16} /> Invoice
+                        </button>
+                    )}
                  </div>
-               )}
-               {booking.status === BookingStatus.COMPLETED && (
-                  <div className="flex items-center gap-1 text-green-400 text-sm italic">
-                    <CheckCircle size={16} /> Done
-                  </div>
                )}
             </div>
           </div>
+
+          {/* Invoice Generator Section */}
+          {invoicingId === booking.id && (
+              <div className="mt-4 pt-4 border-t border-white/10 animate-fadeIn">
+                  <div className="flex flex-col md:flex-row gap-4 items-center justify-between">
+                      <div className="w-full md:w-auto flex flex-col gap-1">
+                          <label className="text-xs text-gray-400">Hourly Rate: Rs. {invoiceRate}</label>
+                          <div className="flex items-center gap-2">
+                              <span className="text-xs text-gray-500">300</span>
+                              <input 
+                                  type="range" 
+                                  min="300" 
+                                  max="5000" 
+                                  step="100" 
+                                  value={invoiceRate}
+                                  onChange={(e) => setInvoiceRate(Number(e.target.value))}
+                                  className="w-full md:w-48 accent-purple-500 h-2 bg-gray-700 rounded-lg appearance-none cursor-pointer"
+                              />
+                              <span className="text-xs text-gray-500">5000</span>
+                          </div>
+                      </div>
+                      <div className="flex items-center gap-4">
+                          <div className="text-right">
+                              <p className="text-xs text-gray-400">Total Amount</p>
+                              <p className="text-xl font-bold text-white">Rs. {invoiceRate * booking.durationHours}</p>
+                          </div>
+                          <div className="flex gap-2">
+                              <button 
+                                  onClick={() => generateAndDownloadPDF(booking, invoiceRate, invoiceRate * booking.durationHours)}
+                                  className="p-2 bg-blue-600 hover:bg-blue-500 rounded-lg text-white" 
+                                  title="Download PDF"
+                              >
+                                  <Download size={18} />
+                              </button>
+                              <button 
+                                  onClick={() => shareOnWhatsApp(booking, invoiceRate * booking.durationHours)}
+                                  className="p-2 bg-green-600 hover:bg-green-500 rounded-lg text-white" 
+                                  title="Send on WhatsApp"
+                              >
+                                  <Share2 size={18} />
+                              </button>
+                              <button 
+                                  onClick={() => setInvoicingId(null)}
+                                  className="p-2 bg-gray-700 hover:bg-gray-600 rounded-lg text-gray-300" 
+                                  title="Close"
+                              >
+                                  <X size={18} />
+                              </button>
+                          </div>
+                      </div>
+                  </div>
+              </div>
+          )}
         </div>
       ))}
     </div>

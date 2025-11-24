@@ -1,7 +1,7 @@
-import React, { useState } from 'react';
-import { Plus, Sparkles, Loader2, X } from 'lucide-react';
+import React, { useState, useRef } from 'react';
+import { Plus, Sparkles, Loader2, X, Mic, Square } from 'lucide-react';
 import { Booking, BookingStatus } from '../types';
-import { parseBookingRequest } from '../services/geminiService';
+import { parseBookingRequest, parseVoiceBookingRequest } from '../services/geminiService';
 
 interface BookingFormProps {
   onAddBooking: (booking: Booking) => void;
@@ -23,6 +23,11 @@ const BookingForm: React.FC<BookingFormProps> = ({ onAddBooking, existingBooking
   const [aiPrompt, setAiPrompt] = useState('');
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  // Voice Recording State
+  const [isRecording, setIsRecording] = useState(false);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
 
   const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
@@ -105,6 +110,71 @@ const BookingForm: React.FC<BookingFormProps> = ({ onAddBooking, existingBooking
     }
   };
 
+  const startRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mediaRecorder = new MediaRecorder(stream);
+      mediaRecorderRef.current = mediaRecorder;
+      audioChunksRef.current = [];
+
+      mediaRecorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          audioChunksRef.current.push(event.data);
+        }
+      };
+
+      mediaRecorder.onstop = async () => {
+        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+        await processVoiceBooking(audioBlob);
+        // Stop all tracks to release microphone
+        stream.getTracks().forEach(track => track.stop());
+      };
+
+      mediaRecorder.start();
+      setIsRecording(true);
+      setError(null);
+    } catch (err) {
+      console.error("Microphone access denied:", err);
+      setError("Microphone access denied or not available.");
+    }
+  };
+
+  const stopRecording = () => {
+    if (mediaRecorderRef.current && isRecording) {
+      mediaRecorderRef.current.stop();
+      setIsRecording(false);
+    }
+  };
+
+  const processVoiceBooking = async (audioBlob: Blob) => {
+    setIsAnalyzing(true);
+    try {
+      // Convert Blob to Base64
+      const reader = new FileReader();
+      reader.readAsDataURL(audioBlob);
+      reader.onloadend = async () => {
+        const base64String = (reader.result as string).split(',')[1];
+        // Use webm as it is the typical recording format
+        const extracted = await parseVoiceBookingRequest(base64String, 'audio/webm');
+        
+        if (extracted) {
+          setFormData(prev => ({
+            ...prev,
+            ...extracted,
+            type: extracted.type || prev.type,
+            durationHours: extracted.durationHours || prev.durationHours
+          }));
+        } else {
+          setError("Could not understand the voice input.");
+        }
+        setIsAnalyzing(false);
+      };
+    } catch (e) {
+      setError("Error processing voice data.");
+      setIsAnalyzing(false);
+    }
+  };
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
       <div className="glass-panel w-full max-w-lg rounded-2xl p-6 relative animate-fadeIn">
@@ -122,24 +192,47 @@ const BookingForm: React.FC<BookingFormProps> = ({ onAddBooking, existingBooking
         {/* AI Assistant Section */}
         <div className="mb-6 bg-purple-900/20 border border-purple-500/30 rounded-xl p-4">
           <label className="block text-xs font-semibold text-purple-300 uppercase mb-2 flex items-center gap-2">
-            <Sparkles size={14} /> AI Quick Fill
+            <Sparkles size={14} /> AI Quick Fill (Text or Voice)
           </label>
           <div className="flex gap-2">
             <input
               type="text"
               value={aiPrompt}
               onChange={(e) => setAiPrompt(e.target.value)}
-              placeholder="e.g., 'Book John for vocals tomorrow at 2pm for 3 hours'"
+              placeholder="e.g., 'Book John for vocals tomorrow at 2pm'"
               className="flex-1 bg-black/40 border border-white/10 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-purple-500 text-white placeholder-white/30"
             />
+            
+            {isRecording ? (
+               <button
+                onClick={stopRecording}
+                className="bg-red-500 hover:bg-red-600 text-white px-3 py-2 rounded-lg transition-colors flex items-center gap-2 animate-pulse"
+                title="Stop Recording"
+              >
+                <Square size={16} fill="currentColor" />
+              </button>
+            ) : (
+              <button
+                onClick={startRecording}
+                disabled={isAnalyzing}
+                className="bg-purple-900/50 hover:bg-purple-800/50 border border-purple-500/30 text-purple-200 px-3 py-2 rounded-lg transition-colors flex items-center gap-2"
+                title="Record Voice (Tamil/English)"
+              >
+                <Mic size={16} />
+              </button>
+            )}
+
             <button
               onClick={handleAIFill}
-              disabled={isAnalyzing}
+              disabled={isAnalyzing || isRecording}
               className="bg-purple-600 hover:bg-purple-500 text-white px-4 py-2 rounded-lg transition-colors flex items-center gap-2 text-sm font-semibold disabled:opacity-50"
             >
               {isAnalyzing ? <Loader2 size={16} className="animate-spin" /> : 'Fill'}
             </button>
           </div>
+          <p className="text-[10px] text-gray-500 mt-2">
+            * Supports English and Tamil voice inputs.
+          </p>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">
